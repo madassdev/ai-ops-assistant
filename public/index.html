@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Ops Assistant Demo</title>
+<meta name="description" content="An AI assistant for a service business's back office. It answers from live business data through MCP, and every change waits for a person to approve it.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231C2229'/><path d='M9 16.5l4.5 4.5L23 11' stroke='%23E2A11A' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css?v=1">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-row">
+    <div class="brand"><span class="mark" aria-hidden="true">C</span><span><strong>Copperline Ops</strong><span class="by">Demo by Frank A., AI integration engineer</span></span></div>
+    <div class="top-actions">
+      <div class="role" role="radiogroup" aria-label="Act as">
+        <span class="role-label">Act as</span>
+        <button type="button" role="radio" aria-checked="true" data-role="dispatcher">Dispatcher</button>
+        <button type="button" role="radio" aria-checked="false" data-role="owner">Owner</button>
+      </div>
+      <a class="hire" href="https://www.upwork.com/freelancers/~0170dd39761ac49004" target="_blank" rel="noopener">Hire me on Upwork</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="intro">
+    <h1>An AI assistant for the back office that never changes anything without asking.</h1>
+    <p>Ask about jobs, customers, unpaid invoices or revenue for <strong>Copperline Heating &amp; Air</strong>. When it wants to send a reminder, move a job or refund money, it queues the change for you to approve. Refunds need the owner.</p>
+  </section>
+
+  <section class="figures" aria-label="Today at Copperline" id="figures">
+    <div><span class="fig-label">Jobs today</span><span class="fig" id="figJobs">–</span><span class="fig-sub" id="figJobsSub"></span></div>
+    <div><span class="fig-label">Open invoices</span><span class="fig" id="figOpen">–</span><span class="fig-sub" id="figOpenSub"></span></div>
+    <div><span class="fig-label">Overdue</span><span class="fig" id="figOverdue">–</span><span class="fig-sub" id="figOverdueSub"></span></div>
+    <div><span class="fig-label">Collected, last 30 days</span><span class="fig" id="figMonth">–</span><span class="fig-sub">on invoices issued in that time</span></div>
+  </section>
+
+  <div class="stage">
+    <section class="chat" aria-label="Ask the back office">
+      <div class="messages" id="messages" aria-live="polite">
+        <div class="msg bot">Hi, I can look up customers, jobs, invoices and revenue, and prepare changes for you to approve. What do you need?</div>
+      </div>
+      <div class="suggestions" id="suggestions">
+        <button type="button">Who owes us money and is more than two weeks late?</button>
+        <button type="button">Text the three most overdue customers a polite reminder</button>
+        <button type="button">How much did each technician bring in this month?</button>
+        <button type="button">Move Elena's first job tomorrow to the afternoon</button>
+      </div>
+      <form class="composer" id="composer">
+        <label class="sr-only" for="input">Message</label>
+        <textarea id="input" rows="1" placeholder="Ask about jobs, invoices, customers or revenue" maxlength="600" disabled></textarea>
+        <button type="submit" id="send" disabled>Send</button>
+      </form>
+      <p class="fine" id="fine"><span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span></p>
+    </section>
+
+    <aside class="side">
+      <section aria-labelledby="queueTitle">
+        <div class="side-head">
+          <h2 id="queueTitle">Waiting for your approval</h2>
+          <span class="count" id="pendingCount" hidden></span>
+        </div>
+        <div id="queue" class="queue">
+          <p class="empty">Nothing yet. When the assistant wants to change something, it appears here first, exactly as it will happen.</p>
+        </div>
+      </section>
+      <section aria-labelledby="auditTitle">
+        <h2 id="auditTitle">Audit trail</h2>
+        <ol class="audit" id="audit"><li class="empty">Every proposal, approval and refusal is recorded with who decided it.</li></ol>
+      </section>
+    </aside>
+  </div>
+
+  <section class="mcp" aria-labelledby="mcpTitle">
+    <div>
+      <h2 id="mcpTitle">Connect your own Claude to the same data</h2>
+      <p>The assistant gets its tools from an MCP server. A read-only copy is public, so you can add it to Claude Desktop, Claude Code or any MCP client and ask the same questions yourself. The tools that change data aren't exposed here.</p>
+    </div>
+    <div class="mcp-box">
+      <div class="mcp-row"><code id="mcpUrl"></code><button type="button" class="ghost small" id="copyUrl">Copy URL</button></div>
+      <p class="mcp-hint">Claude Code:</p>
+      <pre><code id="mcpCmd"></code></pre>
+    </div>
+  </section>
+
+  <section class="notes" aria-labelledby="notesTitle">
+    <h2 id="notesTitle">How it's built</h2>
+    <div class="notes-grid">
+      <div><h3>Business tools over MCP</h3><p>Customers, jobs, invoices and revenue are MCP tools. The assistant discovers them at startup, so adding a tool to the server needs no change to the AI code.</p></div>
+      <div><h3>Approval is enforced in code</h3><p>Tools that change data are marked by the server, and the host turns every such call into a pending action. The AI can't skip it, and it's told nothing is done until a person approves.</p></div>
+      <div><h3>Roles and an audit trail</h3><p>Reminders and reschedules need the dispatcher, refunds need the owner. Each action runs once, even on a double click, and every decision is logged.</p></div>
+      <div><h3>The server double-checks</h3><p>Inputs are validated again by the MCP server: no refund above what was paid, no reschedule onto a busy technician or outside opening hours.</p></div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-row">
+    <p>I connect AI assistants like this to the tools a business already runs on: CRM, field-service software, accounting and messaging.</p>
+    <a class="hire solid" href="https://www.upwork.com/freelancers/~0170dd39761ac49004" target="_blank" rel="noopener">Work with me on Upwork</a>
+  </div>
+</footer>
+
+<script src="app.js?v=3" type="module"></script>
+</body>
+</html>

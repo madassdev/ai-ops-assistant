@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    container_name: ops-demo
+    restart: unless-stopped
+    mem_limit: 256m
+    env_file: .env
+    volumes:
+      - data:/app/data
+    networks:
+      - web
+volumes:
+  data:
+networks:
+  web:
+    external: true
