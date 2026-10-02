@@ -6,7 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { DateTime } from 'luxon';
 import { openDb, ensureFreshData, nowLocal, money, TECHS, ZONE } from './data.mjs';
 import { createOpsServer } from './mcp-server.mjs';
-import { connectBackOffice, decide, ROLES } from './approvals.mjs';
+import { connectBackOffice, decide, ROLES, readResult, requestAction } from './approvals.mjs';
 import { respond, AiUnavailable, MODEL } from './agent.mjs';
 import { LIMITS, issueChallenge, verifyChallenge, createSession, getSession, initUsage, usageToday, aiBlocked, recordUsage } from './guard.mjs';
 
@@ -17,6 +17,21 @@ initUsage(db);
 ensureFreshData(db);
 setInterval(() => ensureFreshData(db), 30 * 60_000).unref();
 const bo = await connectBackOffice(db);
+
+// Is the AI provider usable? A 1-token probe at start and every 15 minutes (refused, and
+// free, when there's no credit).
+const aiHealth = { ok: null };
+const probeClient = new Anthropic({ timeout: 15_000, maxRetries: 0 });
+async function probeAi() {
+  try {
+    await probeClient.messages.create({ model: 'claude-haiku-4-5', max_tokens: 1, messages: [{ role: 'user', content: 'ok' }] });
+    aiHealth.ok = true;
+  } catch (err) {
+    aiHealth.ok = !(err instanceof Anthropic.AuthenticationError || (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)));
+  }
+}
+if (LIMITS.aiEnabled) { probeAi(); setInterval(probeAi, 15 * 60_000).unref(); }
+const aiStatus = () => aiBlocked(db) ?? (aiHealth.ok === false ? 'paused' : 'ok');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -47,7 +62,7 @@ app.get('/api/overview', limiter(120, 1), (_req, res) => {
     openInvoices: { count: open.n, owed: money(open.owed) },
     overdue: { count: overdue.n, owed: money(overdue.owed) },
     collectedThisMonth: money(month.s),
-    ai: { status: aiBlocked(db) ?? 'ok', spentToday: Number(u.cost_usd.toFixed(4)), budget: LIMITS.dailyBudgetUsd },
+    ai: { status: aiStatus(), spentToday: Number(u.cost_usd.toFixed(4)), budget: LIMITS.dailyBudgetUsd },
   });
 });
 
@@ -91,7 +106,7 @@ app.post('/api/chat', limiter(40, 60), async (req, res) => {
     res.json({ ...out, messagesLeft: LIMITS.messagesPerSession - s.turns, sessionCost: s.cost });
   } catch (err) {
     if (err instanceof AiUnavailable) return res.status(503).json({ error: UNAVAILABLE[err.message] ?? UNAVAILABLE.disabled });
-    if (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)) return res.status(503).json({ error: UNAVAILABLE.no_credit });
+    if (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)) { aiHealth.ok = false; return res.status(503).json({ error: UNAVAILABLE.no_credit, paused: true }); }
     if (err instanceof Anthropic.RateLimitError) return res.status(503).json({ error: 'The AI service is busy. Try again in a minute.' });
     if (err instanceof Anthropic.APIError) {
       console.error('anthropic error', err.status, err.message);
@@ -102,6 +117,37 @@ app.post('/api/chat', limiter(40, 60), async (req, res) => {
   } finally {
     s.busy = false;
   }
+});
+
+// Example run, no AI: real data through the same MCP tools, and real approval cards queued for
+// this visitor (three reminders and one owner-only refund) so they can practise approving.
+app.post('/api/example', limiter(10, 10), async (req, res) => {
+  const s = sessionFrom(req);
+  if (!s) return res.status(401).json({ error: 'Session expired. Reload the page.', expired: true });
+  s.examples = (s.examples ?? 0) + 1;
+  if (s.examples > 3) return res.status(429).json({ error: 'You have played the example a few times already. Reload the page to start fresh.' });
+  const { data: unpaid } = readResult(await bo.client.callTool({ name: 'list_unpaid_invoices', arguments: { min_days_overdue: 14 } }));
+  const top = unpaid.invoices.slice(0, 3);
+  const lines = top.map((i) => `- ${i.customer}: ${i.balance} on ${i.number}, ${i.days_overdue} days late`).join(String.fromCharCode(10));
+  const proposals = [];
+  for (const inv of top) {
+    const first = inv.customer.split(' ')[0];
+    const message = `Hi ${first}, a friendly reminder that invoice ${inv.number} for ${inv.balance} was due on ${inv.due_on}. You can pay by card or bank transfer. Thank you! Copperline Heating & Air`;
+    proposals.push(requestAction(db, s.id, 'send_payment_reminder', { invoice_id: inv.invoice_id, channel: 'sms', message }));
+  }
+  const paid = db.prepare("SELECT i.id, i.number, c.name FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.status = 'paid' AND i.total BETWEEN 120 AND 600 ORDER BY i.issued_on DESC LIMIT 1").get();
+  if (paid) proposals.push(requestAction(db, s.id, 'issue_refund', { invoice_id: paid.id, amount: 25, reason: 'Charged for a filter the customer supplied themselves' }));
+  res.json({
+    steps: [
+      { who: 'me', text: 'Who owes us money and is more than two weeks late?' },
+      { who: 'bot', events: ['Checked unpaid invoices'], text: `${unpaid.count} invoices are more than two weeks late, ${unpaid.total_outstanding} in total. The oldest three:${String.fromCharCode(10)}${lines}` },
+      { who: 'me', text: 'Text those three a polite reminder.' },
+      { who: 'bot', events: top.map((i) => `Queued for approval: text ${i.customer}`), text: 'I have drafted three reminders. They are waiting in your approval inbox, nothing has been sent yet.' },
+      { who: 'me', text: `Also refund $25 to ${paid?.name ?? 'the customer'}, they supplied their own filter.` },
+      { who: 'bot', events: ['Queued for approval: refund'], text: 'Refund drafted. Refunds need the owner, so it is waiting for Olivia to approve.' },
+    ],
+    proposals,
+  });
 });
 
 const actionView = (a) => ({

@@ -1,237 +1,245 @@
-const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const state = { session: null, role: 'dispatcher', busy: false, seenActions: new Set() };
-window.opsDemo = state; // handy when inspecting the demo in devtools
+import { $, $$, esc, sleep, loadIcons, hydrateIcons, icon, toast, Guide, reveal, countUp, startSession, postJson, reducedMotion } from './kit.js?v=7';
 
-const els = {
-  messages: $('#messages'), input: $('#input'), send: $('#send'), composer: $('#composer'), suggestions: $('#suggestions'),
-  statusDot: $('#statusDot'), statusText: $('#statusText'), queue: $('#queue'), audit: $('#audit'), pendingCount: $('#pendingCount'),
-};
+const state = { session: null, role: 'dispatcher', busy: false, playing: false, aiStatus: 'ok', seen: new Set() };
+window.opsDemo = state; // handy when inspecting the demo in devtools
+const els = { messages: $('#messages'), input: $('#input'), send: $('#send'), composer: $('#composer'), quick: $('#quick'), live: $('#live'), queue: $('#queue'), audit: $('#audit'), auditN: $('#auditN'), pending: $('#pendingCount'), notice: $('#aiNotice') };
+
+const guide = new Guide({
+  key: 'ops', title: 'Your demo checklist', openWhen: '#try',
+  missions: [
+    { id: 'watch', title: 'Watch the example', hint: 'It finds late payers and drafts reminders for you.', action: { label: 'Play it', run: () => playExample() } },
+    { id: 'approve', title: 'Approve a reminder as Dee', hint: 'Tap Approve on one of the text messages.', action: { label: 'Show me', run: () => focusInbox() } },
+    { id: 'blocked', title: 'Try to approve the refund as Dee', hint: 'Dee is a dispatcher. Money going out needs the owner.', action: { label: 'Show me', run: () => focusInbox() } },
+    { id: 'owner', title: 'Approve it as Olivia', hint: 'Switch to Olivia, the owner, and approve the refund.', action: { label: 'Switch to Olivia', run: () => setRole('owner') } },
+    { id: 'connect', title: 'Grab the MCP link', hint: 'Plug the same data into your own Claude.', action: { label: 'Show me', run: () => $('#connect').scrollIntoView({ behavior: 'smooth' }) } },
+  ],
+  onComplete: () => toast('That is the whole tour. Want this connected to your software?', { icon: 'party-popper', ms: 6000 }),
+});
+const focusInbox = () => { $('.inbox').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('.inbox').animate?.([{ boxShadow: '0 0 0 0 rgba(79,70,229,.6)' }, { boxShadow: '0 0 0 12px rgba(79,70,229,0)' }], { duration: 900 }); };
 
 // ---------- figures ----------
-
+const money = (s) => Number(String(s).replace(/[^0-9.]/g, ''));
 async function loadFigures() {
   try {
     const o = await (await fetch('/api/overview')).json();
-    const jobs = o.jobsToday.reduce((s, t) => s + t.jobs, 0);
-    $('#figJobs').textContent = jobs;
+    countUp($('#figJobs'), o.jobsToday.reduce((s, t) => s + t.jobs, 0));
     $('#figJobsSub').textContent = o.jobsToday.map((t) => `${t.technician} ${t.jobs}`).join(', ');
-    $('#figOpen').textContent = o.openInvoices.owed;
+    countUp($('#figOpen'), money(o.openInvoices.owed), { prefix: '$' });
     $('#figOpenSub').textContent = `${o.openInvoices.count} invoices`;
-    $('#figOverdue').textContent = o.overdue.owed;
-    $('#figOverdueSub').textContent = `${o.overdue.count} past due`;
-    $('#figMonth').textContent = o.collectedThisMonth;
-  } catch { /* figures are decoration; the next refresh retries */ }
+    countUp($('#figLate'), money(o.overdue.owed), { prefix: '$' });
+    $('#figLateSub').textContent = `${o.overdue.count} invoices past due`;
+    countUp($('#figMonth'), money(o.collectedThisMonth), { prefix: '$' });
+    state.aiStatus = o.ai.status;
+    renderNotice();
+  } catch { /* decoration only */ }
+}
+
+function renderNotice() {
+  if (state.aiStatus === 'ok' || state.playing) { els.notice.innerHTML = ''; return; }
+  els.notice.innerHTML = `<div class="notice warn">${icon('hourglass')}<div><b>The live AI is taking a break right now.</b> Everything else works: play the example to fill the approval inbox with real cards and try approving them.<br><button type="button" class="btn btn-soft btn-sm" data-play>${icon('play')}Play the example</button></div></div>`;
 }
 
 // ---------- chat ----------
-
-/** Minimal formatting for assistant text: paragraphs, bullet lists, **bold**. */
 function format(text) {
   const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   return text.split(/\n{2,}/).map((block) => {
     const lines = block.split('\n');
-    if (lines.every((l) => /^\s*([-•*]|\d+\.)\s+/.test(l))) {
-      return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*([-•*]|\d+\.)\s+/, ''))}</li>`).join('')}</ul>`;
+    const bullets = lines.filter((l) => /^\s*([-•*]|\d+\.)\s+/.test(l));
+    if (bullets.length && bullets.length === lines.length) return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*([-•*]|\d+\.)\s+/, ''))}</li>`).join('')}</ul>`;
+    if (bullets.length) {
+      const head = lines.filter((l) => !/^\s*([-•*]|\d+\.)\s+/.test(l));
+      return `<p>${head.map(inline).join('<br>')}</p><ul>${bullets.map((l) => `<li>${inline(l.replace(/^\s*([-•*]|\d+\.)\s+/, ''))}</li>`).join('')}</ul>`;
     }
     return `<p>${lines.map(inline).join('<br>')}</p>`;
   }).join('');
 }
-
-function addMessage(kind, text, html = false) {
-  const div = document.createElement('div');
-  div.className = `msg ${kind}`;
-  if (html) div.innerHTML = text; else div.textContent = text;
-  els.messages.append(div);
+const meAvatar = () => (state.role === 'owner' ? '<span class="av o">O</span>' : '<span class="av d">D</span>');
+function addRow(who, html) {
+  const row = document.createElement('div');
+  row.className = `row ${who}`;
+  row.innerHTML = `${who === 'me' ? meAvatar() : `<span class="av bot">${icon('bot')}</span>`}<div class="bubble">${html}</div>`;
+  els.messages.append(row);
   els.messages.scrollTop = els.messages.scrollHeight;
-  return div;
+  return row;
 }
-
-const TOOL_LABEL = {
-  search_customers: 'Searched customers', get_customer: 'Opened customer', list_jobs: 'Listed jobs',
-  list_unpaid_invoices: 'Checked unpaid invoices', revenue_summary: 'Summarised revenue',
-};
-
-function addTrace(events) {
-  if (!events.length) return;
-  const div = document.createElement('div');
-  div.className = 'trace';
-  div.innerHTML = events.map((e) => {
-    if (e.kind === 'proposed') return `<span class="proposed">Queued for approval: ${esc(e.text)}</span>`;
-    if (e.kind === 'error') return `<span class="error">${esc(e.text)}</span>`;
-    return `<span>${esc(TOOL_LABEL[e.tool] ?? e.tool)}</span>`;
-  }).join('');
-  els.messages.append(div);
+function addTrace(items) {
+  if (!items.length) return;
+  const d = document.createElement('div');
+  d.className = 'trace';
+  d.innerHTML = items.map((t) => `<span class="${t.cls ?? ''}">${icon(t.icon)}${esc(t.text)}</span>`).join('');
+  els.messages.append(d);
 }
-
-function setStatus(kind, text) { els.statusDot.className = `dot ${kind}`; els.statusText.textContent = text; }
-
-function setBusy(busy) {
-  state.busy = busy;
-  const ready = !!state.session && !busy;
-  els.input.disabled = !state.session;
+function typingRow() { const r = addRow('bot', '<span class="typing"><i></i><i></i><i></i></span>'); return r; }
+function errorNote(text) { const d = document.createElement('div'); d.className = 'err'; d.textContent = text; els.messages.append(d); els.messages.scrollTop = els.messages.scrollHeight; }
+function setReady() {
+  const ready = !!state.session && !state.busy && !state.playing;
+  els.input.disabled = !state.session || state.playing;
   els.send.disabled = !ready;
-  els.suggestions.querySelectorAll('button').forEach((b) => (b.disabled = !ready));
+  $$('.chip', els.quick).forEach((b) => (b.disabled = !ready));
 }
+
+const TOOL_LABEL = { search_customers: 'Searched customers', get_customer: 'Opened a customer', list_jobs: 'Checked the schedule', list_unpaid_invoices: 'Checked unpaid invoices', revenue_summary: 'Added up revenue' };
 
 async function send(text) {
-  text = text.trim();
-  if (!text || state.busy || !state.session) return;
-  els.suggestions.hidden = true;
-  addMessage('me', text);
-  els.input.value = '';
-  autosize();
-  setBusy(true);
-  const typing = addMessage('bot typing', '');
-  typing.innerHTML = '<i></i><i></i><i></i>';
-  try {
-    const r = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: state.session, message: text }) });
-    const data = await r.json();
-    typing.remove();
-    if (!r.ok) {
-      addMessage('error', data.error ?? 'Something went wrong.');
-      if (data.expired) state.session = null;
-      return;
-    }
-    addTrace(data.events ?? []);
-    addMessage('bot', format(data.reply), true);
-    if (data.messagesLeft <= 3) setStatus('on', `${data.messagesLeft} message${data.messagesLeft === 1 ? '' : 's'} left in this demo session`);
-    await loadActions();
-  } catch {
-    typing.remove();
-    addMessage('error', 'Could not reach the server. Check your connection and try again.');
-  } finally {
-    setBusy(false);
-    els.input.focus();
-  }
+  text = String(text ?? '').trim();
+  if (!text || state.busy || state.playing) return;
+  if (!state.session) { toast('Still connecting, one moment…', { icon: 'hourglass', tone: 'warn' }); return; }
+  els.quick.hidden = true;
+  addRow('me', esc(text));
+  els.input.value = ''; autosize();
+  state.busy = true; setReady();
+  const t = typingRow();
+  const { ok, data } = await postJson('/api/chat', { session: state.session, message: text }).catch(() => ({ ok: false, data: { error: 'Could not reach the server.' } }));
+  t.remove();
+  state.busy = false; setReady();
+  if (!ok) { errorNote(data.error ?? 'Something went wrong.'); if (data.paused) { state.aiStatus = 'paused'; renderNotice(); } return; }
+  addTrace((data.events ?? []).map((e) => e.kind === 'proposed' ? { icon: 'clipboard-list', text: `Queued: ${e.text}`, cls: 'q' } : e.kind === 'error' ? { icon: 'x', text: e.text, cls: 'e' } : { icon: 'search', text: TOOL_LABEL[e.tool] ?? e.tool }));
+  addRow('bot', format(data.reply));
+  if ((data.events ?? []).some((e) => e.kind === 'proposed')) { await loadActions(); focusInbox(); }
 }
-
 function autosize() { els.input.style.height = 'auto'; els.input.style.height = `${Math.min(els.input.scrollHeight, 120)}px`; }
 els.composer.addEventListener('submit', (e) => { e.preventDefault(); send(els.input.value); });
 els.input.addEventListener('input', autosize);
 els.input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(els.input.value); } });
-els.suggestions.addEventListener('click', (e) => { if (e.target.tagName === 'BUTTON') send(e.target.textContent); });
+els.quick.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) send(b.textContent); });
 
-// ---------- approvals ----------
-
-const roleName = (r) => (r === 'owner' ? 'owner' : 'dispatcher');
-
-function actionCard(a) {
-  const just = a.status === 'pending' && !state.seenActions.has(a.id);
-  state.seenActions.add(a.id);
-  const cls = { pending: '', executed: 'done', running: '', rejected: 'rejected', failed: 'failed' }[a.status] ?? '';
-  let footer = '';
-  if (a.status === 'pending') {
-    footer = `<p class="needs">Needs the <b>${roleName(a.requiredRole)}</b> to approve.</p>
-      <div class="buttons"><button type="button" class="btn approve" data-act="${a.id}" data-approve="1">Approve</button><button type="button" class="btn" data-act="${a.id}" data-approve="0">Reject</button></div>
-      <p class="warn" id="warn-${a.id}" hidden></p>`;
-  } else if (a.status === 'executed') {
-    footer = `<p class="outcome ok">Approved by ${esc(a.decidedBy)} and done.</p>`;
-  } else if (a.status === 'failed') {
-    footer = `<p class="outcome bad">Approved by ${esc(a.decidedBy)}, but the system refused it: ${esc(a.result?.error ?? 'unknown error')}</p>`;
-  } else if (a.status === 'rejected') {
-    footer = `<p class="outcome">Rejected by ${esc(a.decidedBy)}. Nothing changed.</p>`;
+// ---------- example (no AI: real data and real approval cards) ----------
+async function playExample() {
+  if (state.playing) return;
+  if (!state.session) { toast('Still connecting, one moment…', { icon: 'hourglass', tone: 'warn' }); return; }
+  state.playing = true; setReady(); renderNotice();
+  $('#try').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  els.quick.hidden = true;
+  const { ok, data } = await postJson('/api/example', { session: state.session });
+  if (!ok) { errorNote(data.error ?? 'The example could not load.'); state.playing = false; setReady(); return; }
+  if (state.role !== 'dispatcher') await setRole('dispatcher', { quiet: true });
+  els.messages.innerHTML = '';
+  const tag = document.createElement('div'); tag.className = 'example-tag'; tag.innerHTML = `${icon('play')}Example run: real numbers and real approval cards, pre-written questions`; els.messages.append(tag);
+  const speed = reducedMotion() ? 0.2 : 1;
+  for (const step of data.steps) {
+    if (step.who === 'me') { await sleep(700 * speed); addRow('me', esc(step.text)); continue; }
+    const t = typingRow(); await sleep(1500 * speed); t.remove();
+    addTrace(step.events.map((e) => e.startsWith('Queued') ? { icon: 'clipboard-list', text: e, cls: 'q' } : { icon: 'search', text: e }));
+    addRow('bot', format(step.text));
+    if (step.events.some((e) => e.startsWith('Queued'))) await loadActions();
   }
-  return `<article class="action ${cls}${just ? ' just' : ''}">
-    <div class="action-top"><h3>${esc(a.summary)}</h3><time>${esc(a.createdAt)}</time></div>
-    <pre>${esc(a.detail)}</pre>${footer}</article>`;
+  guide.complete('watch');
+  state.playing = false; setReady(); renderNotice();
+  toast('Four changes are waiting for approval. Try approving one as Dee.', { icon: 'clipboard-list', ms: 5000 });
+  focusInbox();
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-play]')) playExample(); });
+
+// ---------- approval inbox ----------
+const TYPE = {
+  send_payment_reminder: (a) => ({ cls: 'sms', icon: a.summary.startsWith('Email') ? 'mail' : 'message-square', label: a.summary.startsWith('Email') ? 'Email' : 'Text message' }),
+  reschedule_job: () => ({ cls: 'move', icon: 'calendar-clock', label: 'Schedule change' }),
+  create_invoice_draft: () => ({ cls: 'doc', icon: 'file-text', label: 'Draft invoice' }),
+  issue_refund: () => ({ cls: 'money', icon: 'banknote', label: 'Refund' }),
+};
+const roleChip = (r) => r === 'owner' ? `<span class="badge badge-brand">${icon('crown')}Needs Olivia (owner)</span>` : `<span class="badge badge-accent">Dee or Olivia can approve</span>`;
+
+function card(a) {
+  const t = (TYPE[a.tool] ?? (() => ({ cls: 'doc', icon: 'clipboard-list', label: 'Change' })))(a);
+  const isNew = !state.seen.has(a.id);
+  state.seen.add(a.id);
+  let foot = '';
+  if (a.status === 'pending') foot = `<div class="act-btns"><button type="button" class="btn btn-ok btn-sm" data-act="${a.id}" data-approve="1">${icon('check')}Approve</button><button type="button" class="btn btn-line btn-sm" data-act="${a.id}" data-approve="0">Reject</button></div><div class="act-warn" id="warn-${a.id}" hidden></div>`;
+  else if (a.status === 'executed') foot = `<div class="act-out ok">${icon('check-circle-2')}Approved by ${esc(a.decidedBy === 'Owner' ? 'Olivia' : 'Dee')} and done${a.tool === 'send_payment_reminder' ? ': message sent' : ''}.</div>`;
+  else if (a.status === 'failed') foot = `<div class="act-out bad">${icon('alert-triangle')}Approved, but the system refused it: ${esc(a.result?.error ?? 'unknown error')}</div>`;
+  else if (a.status === 'rejected') foot = `<div class="act-out muted">${icon('x')}Rejected. Nothing changed.</div>`;
+  return `<article class="act ${a.status} ${isNew ? 'new' : ''}" data-id="${a.id}">
+    <div class="act-top"><span class="act-type ${t.cls}">${icon(t.icon)}</span><div><h4>${esc(a.summary)}</h4><div class="act-meta"><span class="badge badge-brand">${esc(t.label)}</span>${a.status === 'pending' ? roleChip(a.requiredRole) : ''}</div></div></div>
+    <pre>${esc(a.detail)}</pre>${foot}</article>`;
 }
 
-function auditItem(r) {
-  return `<li class="${esc(r.kind)}"><span class="who">${esc(r.time)}, ${esc(r.actor)}:</span> ${esc(r.text)}</li>`;
-}
-
-async function loadActions() {
+async function loadActions({ auditOnly = false } = {}) {
   if (!state.session) return;
   try {
     const data = await (await fetch(`/api/actions?session=${state.session}`)).json();
     const pending = data.actions.filter((a) => a.status === 'pending');
-    els.pendingCount.hidden = !pending.length;
-    els.pendingCount.textContent = pending.length;
-    if (data.actions.length) {
-      // Pending first, then decided ones, newest first within each.
-      const ordered = [...pending, ...data.actions.filter((a) => a.status !== 'pending')];
-      els.queue.innerHTML = ordered.map(actionCard).join('');
-    }
-    if (data.audit.length) els.audit.innerHTML = data.audit.map(auditItem).join('');
-  } catch { /* retried on the next action */ }
+    els.pending.hidden = !pending.length;
+    els.pending.textContent = `${pending.length} waiting`;
+    // Don't redraw while a warning is showing, or the visitor loses it.
+    const warning = !!els.queue.querySelector('.act-warn:not([hidden])');
+    if (data.actions.length && !auditOnly && !warning) els.queue.innerHTML = [...pending, ...data.actions.filter((a) => a.status !== 'pending')].map(card).join('');
+    els.audit.innerHTML = data.audit.map((r) => `<li class="${esc(r.kind)}"><span>${esc(r.time)}</span> ${esc(r.actor === 'Owner' ? 'Olivia' : r.actor === 'Dispatcher' ? 'Dee' : 'Assistant')}: ${esc(r.text)}</li>`).join('');
+    els.auditN.textContent = `${data.audit.length} event${data.audit.length === 1 ? '' : 's'}`;
+  } catch { /* retried by the poll */ }
 }
 
 els.queue.addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const id = btn.dataset.act;
-  btn.closest('.buttons').querySelectorAll('button').forEach((b) => (b.disabled = true));
-  try {
-    const r = await fetch(`/api/actions/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: state.session, approve: btn.dataset.approve === '1' }) });
-    const data = await r.json();
-    if (!r.ok) {
-      const warn = $(`#warn-${id}`);
-      if (warn) { warn.textContent = data.error; warn.hidden = false; }
-      btn.closest('.buttons').querySelectorAll('button').forEach((b) => (b.disabled = false));
-      await loadActionsAuditOnly();
+  if (btn) {
+    const id = btn.dataset.act, approve = btn.dataset.approve === '1';
+    const cardEl = btn.closest('.act');
+    cardEl.querySelectorAll('.act-btns button').forEach((b) => (b.disabled = true));
+    const { ok, status, data } = await postJson(`/api/actions/${id}`, { session: state.session, approve });
+    const tool = cardEl.querySelector('h4').textContent;
+    if (!ok) {
+      cardEl.querySelectorAll('.act-btns button').forEach((b) => (b.disabled = false));
+      if (status === 403) {
+        cardEl.classList.remove('shake'); void cardEl.offsetWidth; cardEl.classList.add('shake');
+        const w = $(`#warn-${id}`);
+        w.hidden = false;
+        w.innerHTML = `${icon('lock')}<div>Dee can't approve money going out. Only Olivia, the owner, can.<br><button type="button" class="btn btn-dark btn-sm" data-switch>${icon('crown')}Switch to Olivia</button></div>`;
+        guide.complete('blocked');
+      } else toast(data.error ?? 'That did not work.', { icon: 'x', tone: 'bad' });
+      await loadActions({ auditOnly: true }); // keep the warning on screen; the audit trail records the attempt
       return;
     }
+    if (!approve) toast('Rejected. Nothing was changed.', { icon: 'x' });
+    else if (data.status === 'executed') {
+      toast(tool.startsWith('Refund') ? 'Refund issued' : tool.startsWith('Text') || tool.startsWith('Email') ? 'Reminder sent' : 'Done', { icon: 'check', tone: 'ok' });
+      if (tool.startsWith('Refund') && state.role === 'owner') guide.complete('owner');
+      else if (state.role === 'dispatcher') guide.complete('approve');
+    } else toast(`The system refused it: ${data.result?.error ?? 'unknown error'}`, { icon: 'alert-triangle', tone: 'bad' });
     await loadActions();
     loadFigures();
-  } catch {
-    btn.closest('.buttons').querySelectorAll('button').forEach((b) => (b.disabled = false));
+    return;
   }
+  if (e.target.closest('[data-switch]')) setRole('owner');
 });
 
-async function loadActionsAuditOnly() {
-  const data = await (await fetch(`/api/actions?session=${state.session}`)).json();
-  if (data.audit.length) els.audit.innerHTML = data.audit.map(auditItem).join('');
+// ---------- who am I ----------
+async function setRole(role, { quiet = false } = {}) {
+  if (!state.session || role === state.role) return;
+  const { ok } = await postJson('/api/role', { session: state.session, role });
+  if (!ok) return;
+  state.role = role;
+  $$('.people button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.role === role)));
+  if (!quiet) toast(role === 'owner' ? 'You are now Olivia, the owner' : 'You are now Dee, the dispatcher', { icon: role === 'owner' ? 'crown' : 'user' });
+  if (!quiet) $('.who').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Switching person clears any "only the owner can approve" warning.
+  for (const w of $$('.act-warn', els.queue)) w.hidden = true;
+  if (!quiet) loadActions();
 }
+$('.people').addEventListener('click', (e) => { const b = e.target.closest('button[data-role]'); if (b) setRole(b.dataset.role); });
 
-// ---------- role switch (demo only) ----------
-
-document.querySelector('.role').addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-role]');
-  if (!btn || !state.session || btn.dataset.role === state.role) return;
-  const r = await fetch('/api/role', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: state.session, role: btn.dataset.role }) });
-  if (!r.ok) return;
-  state.role = btn.dataset.role;
-  document.querySelectorAll('.role button').forEach((b) => b.setAttribute('aria-checked', String(b === btn)));
-});
-
-// ---------- session ----------
-
-async function startSession() {
-  try {
-    const ch = await (await fetch('/api/challenge')).json();
-    const worker = new Worker('pow-worker.js');
-    const { nonce } = await new Promise((resolve, reject) => {
-      worker.onmessage = (e) => resolve(e.data);
-      worker.onerror = reject;
-      worker.postMessage({ salt: ch.salt, bits: ch.bits });
-    });
-    worker.terminate();
-    const r = await fetch('/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: ch.token, nonce }) });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error);
-    state.session = data.session;
-    setStatus('on', 'Connected. Demo data resets every day.');
-    loadActions();
-    setBusy(false);
-  } catch (err) {
-    setStatus('off', 'Assistant unavailable');
-    addMessage('error', err?.message || 'Could not start a session. Reload the page to try again.');
-  }
-}
-
-// ---------- MCP box ----------
-
+// ---------- MCP link ----------
 const mcpUrl = `${location.origin}/mcp`;
 $('#mcpUrl').textContent = mcpUrl;
-$('#mcpCmd').textContent = `claude mcp add --transport http copperline-ops ${mcpUrl}`;
-$('#copyUrl').addEventListener('click', async (e) => {
-  try { await navigator.clipboard.writeText(mcpUrl); e.target.textContent = 'Copied'; } catch { e.target.textContent = 'Copy failed'; }
-  setTimeout(() => (e.target.textContent = 'Copy URL'), 1500);
+$('#copyUrl').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(mcpUrl); toast('MCP link copied', { icon: 'copy', tone: 'ok' }); } catch { toast(mcpUrl, { icon: 'copy' }); }
+  guide.complete('connect');
 });
 
+// ---------- boot ----------
+await loadIcons();
+hydrateIcons();
+reveal();
 loadFigures();
 setInterval(loadFigures, 60_000);
-setInterval(loadActions, 15_000);
-setBusy(false);
-startSession();
+addRow('bot', format("Hi, I'm the Copperline assistant. Ask me about jobs, customers, unpaid invoices or revenue. If something needs changing, I'll prepare it and you approve it."));
+setReady();
+try {
+  const s = await startSession();
+  state.session = s.session;
+  els.live.textContent = 'Online'; els.live.className = 'pill-live on';
+  loadActions();
+  setInterval(loadActions, 15_000);
+} catch (err) {
+  els.live.textContent = 'Offline'; els.live.className = 'pill-live off';
+  errorNote(err.message);
+}
+setReady();
