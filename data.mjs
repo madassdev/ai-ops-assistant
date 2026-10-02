@@ -66,7 +66,7 @@ export function audit(db, { sessionId = null, actor, kind, text }) {
 // ---------- demo data ----------
 
 const FIRST = ['Dana', 'Luis', 'Priya', 'Tom', 'Grace', 'Andre', 'Molly', 'Ken', 'Rosa', 'Sam', 'Nora', 'Victor', 'Hannah', 'Omar', 'Julia', 'Derek', 'Mei', 'Carlos', 'Beth', 'Isaac'];
-const LAST = ['Whitfield', 'Ortega', 'Raman', 'Becker', 'Kim', 'Wallace', 'Shaw', 'Ito', 'Delgado', 'Okafor', 'Price', 'Nguyen', 'Brooks', 'Haddad', 'Fischer', 'Lowe'];
+const LAST = ['Whitfield', 'Ortega', 'Raman', 'Becker', 'Kim', 'Wallace', 'Shaw', 'Ito', 'Delgado', 'Sullivan', 'Price', 'Nguyen', 'Brooks', 'Haddad', 'Fischer', 'Lowe'];
 const STREETS = ['Oak Hollow Dr', 'S Lamar Blvd', 'Barton Hills Dr', 'Manchaca Rd', 'Burnet Rd', 'Cherrywood Rd', 'Riverside Dr', 'Pecan St', 'Hyde Park Ave', 'Westgate Blvd'];
 const CITIES = [['Austin', '78704'], ['Austin', '78745'], ['Austin', '78751'], ['Round Rock', '78664'], ['Pflugerville', '78660'], ['Cedar Park', '78613']];
 
