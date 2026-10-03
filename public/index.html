@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,9 +8,9 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%234F46E5'/><path d='M9 16.5l4.5 4.5L23 11' stroke='%23FBBF24' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="kit.css?v=7">
-<link rel="stylesheet" href="app.css?v=7">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="kit.css?v=9">
+<link rel="stylesheet" href="app.css?v=9">
 </head>
 <body>
 <nav class="nav">
@@ -24,45 +24,53 @@
 </nav>
 
 <header class="hero" id="top">
+  <div class="hero-grid-bg" aria-hidden="true"></div>
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow"><span class="dot"><i data-icon="sparkles"></i></span>Live demo for service businesses</span>
-      <h1>Ask your business anything. <span class="mark">Approve</span> every change.</h1>
-      <p class="lede">An AI assistant that reads your jobs, customers and invoices, answers in plain English, and prepares the busywork, like payment reminders and rescheduling. Nothing is sent or changed until you tap Approve.</p>
+      <span class="eyebrow mono"><span class="live-dot"></span>LIVE DEMO · BACK-OFFICE AI</span>
+      <h1>Ask your business anything. <span class="glow">Approve every change.</span></h1>
+      <p class="lede">An AI assistant that reads your jobs, customers and invoices, answers in plain English, and prepares the busywork, like payment reminders and rescheduling. <b>Nothing is sent or changed until a person taps Approve.</b></p>
       <div class="hero-cta">
         <button type="button" class="btn btn-primary" data-play><i data-icon="play"></i>Watch the example</button>
         <a class="btn btn-line" href="#try"><i data-icon="message-circle-more"></i>Try it yourself</a>
       </div>
-      <ul class="benefits">
-        <li><span class="tick"><i data-icon="check"></i></span>Answers from your real data</li>
-        <li><span class="tick"><i data-icon="check"></i></span>Drafts the boring follow-ups</li>
-        <li><span class="tick"><i data-icon="check"></i></span>You approve every change</li>
-        <li><span class="tick"><i data-icon="check"></i></span>Refunds need the owner</li>
+      <ul class="hero-points mono">
+        <li><i data-icon="search"></i>Answers from your real data</li>
+        <li><i data-icon="clipboard-list"></i>Drafts the follow-ups</li>
+        <li><i data-icon="shield-check"></i>You approve every change</li>
+        <li><i data-icon="crown"></i>Refunds need the owner</li>
       </ul>
     </div>
-    <div class="hero-art" aria-hidden="true">
-      <div class="ha-q"><span class="ha-av d">D</span><div>Who's late paying us?</div></div>
-      <div class="ha-a"><span class="ha-av bot"><i data-icon="bot"></i></span><div><b>3 invoices</b> are over two weeks late, $612 in total. Want me to text them?</div></div>
-      <div class="ha-card">
-        <div class="ha-card-top"><span class="ha-type"><i data-icon="message-square"></i></span><b>Text Dana about INV-1047</b><span class="ha-pending">Waiting</span></div>
-        <p>"Hi Dana, a friendly reminder that invoice INV-1047 for $148 was due…"</p>
-        <div class="ha-btns"><span class="ha-approve">Approve</span><span class="ha-reject">Reject</span></div>
-        <div class="ha-done"><i data-icon="check-circle-2"></i>Approved and sent</div>
+    <div class="console-wrap" aria-hidden="true">
+      <div class="console">
+        <div class="console-bar mono"><span class="dots"><i></i><i></i><i></i></span>copperline-ops / assistant<span class="console-live">● live</span></div>
+        <ol class="feed mono">
+          <li class="f1"><span class="who d">DEE</span>who's late paying us?</li>
+          <li class="f2"><span class="tool">read</span>list_unpaid_invoices <span class="dim">→ 11 invoices · $1,569</span></li>
+          <li class="f3"><span class="who ai">AI</span>3 are 30+ days late. Text them?</li>
+          <li class="f4"><span class="tool q">queued</span>payment_reminder <span class="dim">→ Hannah B. · $64</span></li>
+          <li class="f5"><span class="tool lock">blocked</span>refund $25 <span class="dim">→ owner only</span></li>
+          <li class="f6"><span class="tool ok">done</span>Olivia approved · SMS sent</li>
+        </ol>
       </div>
-      <div class="ha-cursor"></div>
+      <div class="approve-card">
+        <div class="ac-top"><span class="ac-ico"><i data-icon="message-square"></i></span><div><b>Text Hannah about INV-1043</b><small>$64.00 · 46 days late</small></div><span class="ac-wait mono">WAITING</span></div>
+        <div class="ac-btns"><span class="ac-ok"><i data-icon="check"></i>Approve</span><span class="ac-no">Reject</span></div>
+        <div class="ac-sent"><i data-icon="check-circle-2"></i>Approved · sent</div>
+      </div>
     </div>
   </div>
-</header>
-
-<main>
-  <section class="figures-band">
-    <div class="wrap figures" id="figures">
+  <div class="wrap">
+    <div class="figures" id="figures">
       <div class="fig-tile"><span class="fig-ico jobs"><i data-icon="hard-hat"></i></span><div><span class="fig" id="figJobs">0</span><span class="fig-label">jobs today</span><span class="fig-sub" id="figJobsSub"></span></div></div>
       <div class="fig-tile"><span class="fig-ico open"><i data-icon="receipt"></i></span><div><span class="fig" id="figOpen">$0</span><span class="fig-label">waiting to be paid</span><span class="fig-sub" id="figOpenSub"></span></div></div>
       <div class="fig-tile"><span class="fig-ico late"><i data-icon="alert-triangle"></i></span><div><span class="fig" id="figLate">$0</span><span class="fig-label">overdue</span><span class="fig-sub" id="figLateSub"></span></div></div>
       <div class="fig-tile"><span class="fig-ico paid"><i data-icon="trending-up"></i></span><div><span class="fig" id="figMonth">$0</span><span class="fig-label">collected, last 30 days</span><span class="fig-sub">Copperline Heating &amp; Air</span></div></div>
     </div>
-  </section>
+  </div>
+</header>
+
+<main>
 
   <section class="section" id="try">
     <div class="wrap">
@@ -166,6 +174,6 @@
 
 <footer class="foot"><div class="wrap foot-row"><span>Demo by Frank A., AI integration engineer. Copperline Heating &amp; Air is fictional; data resets daily.</span><a href="https://github.com/madassdev/ai-ops-assistant" target="_blank" rel="noopener">Source code on GitHub</a></div></footer>
 
-<script src="app.js?v=7" type="module"></script>
+<script src="app.js?v=9" type="module"></script>
 </body>
 </html>

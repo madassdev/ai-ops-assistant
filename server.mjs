@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import Anthropic from '@anthropic-ai/sdk';
+import { probe, classifyError, PROVIDER } from './llm.mjs';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { DateTime } from 'luxon';
 import { openDb, ensureFreshData, nowLocal, money, TECHS, ZONE } from './data.mjs';
@@ -21,15 +21,7 @@ const bo = await connectBackOffice(db);
 // Is the AI provider usable? A 1-token probe at start and every 15 minutes (refused, and
 // free, when there's no credit).
 const aiHealth = { ok: null };
-const probeClient = new Anthropic({ timeout: 15_000, maxRetries: 0 });
-async function probeAi() {
-  try {
-    await probeClient.messages.create({ model: 'claude-haiku-4-5', max_tokens: 1, messages: [{ role: 'user', content: 'ok' }] });
-    aiHealth.ok = true;
-  } catch (err) {
-    aiHealth.ok = !(err instanceof Anthropic.AuthenticationError || (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)));
-  }
-}
+async function probeAi() { aiHealth.ok = await probe(); }
 if (LIMITS.aiEnabled) { probeAi(); setInterval(probeAi, 15 * 60_000).unref(); }
 const aiStatus = () => aiBlocked(db) ?? (aiHealth.ok === false ? 'paused' : 'ok');
 
@@ -106,10 +98,15 @@ app.post('/api/chat', limiter(40, 60), async (req, res) => {
     res.json({ ...out, messagesLeft: LIMITS.messagesPerSession - s.turns, sessionCost: s.cost });
   } catch (err) {
     if (err instanceof AiUnavailable) return res.status(503).json({ error: UNAVAILABLE[err.message] ?? UNAVAILABLE.disabled });
-    if (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)) { aiHealth.ok = false; return res.status(503).json({ error: UNAVAILABLE.no_credit, paused: true }); }
-    if (err instanceof Anthropic.RateLimitError) return res.status(503).json({ error: 'The AI service is busy. Try again in a minute.' });
-    if (err instanceof Anthropic.APIError) {
-      console.error('anthropic error', err.status, err.message);
+    const kind = classifyError(err);
+    if (kind === 'no_credit') {
+      console.error(`${PROVIDER}: key rejected or out of credit`);
+      aiHealth.ok = false;
+      return res.status(503).json({ error: UNAVAILABLE.no_credit, paused: true });
+    }
+    if (kind === 'busy') return res.status(503).json({ error: 'The AI service is busy. Try again in a minute.' });
+    if (kind === 'api') {
+      console.error(`${PROVIDER} error`, err.status, err.message);
       return res.status(502).json({ error: 'The AI service returned an error. Try sending that again.' });
     }
     console.error(err);
@@ -191,4 +188,4 @@ app.post('/mcp', mcpLimiter, async (req, res) => {
 });
 app.all('/mcp', (_req, res) => res.status(405).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. POST JSON-RPC to this endpoint.' }, id: null }));
 
-app.listen(PORT, () => console.log(`ops on :${PORT} using ${MODEL}; AI ${LIMITS.aiEnabled ? 'on' : 'off'}`));
+app.listen(PORT, () => console.log(`ops on :${PORT} using ${PROVIDER} ${MODEL}; AI ${LIMITS.aiEnabled ? 'on' : 'off'}`));

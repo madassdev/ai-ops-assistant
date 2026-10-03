@@ -1,4 +1,4 @@
-import { $, $$, esc, sleep, loadIcons, hydrateIcons, icon, toast, Guide, reveal, countUp, startSession, postJson, reducedMotion } from './kit.js?v=7';
+import { $, $$, esc, sleep, loadIcons, hydrateIcons, icon, toast, Guide, reveal, countUp, startSession, postJson, reducedMotion } from './kit.js?v=9';
 
 const state = { session: null, role: 'dispatcher', busy: false, playing: false, aiStatus: 'ok', seen: new Set() };
 window.opsDemo = state; // handy when inspecting the demo in devtools

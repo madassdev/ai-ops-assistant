@@ -1,16 +1,12 @@
-// The ops assistant: Claude, with tools discovered from the back-office MCP server.
+// The ops assistant: an LLM (OpenAI or Claude, see llm.mjs), with tools discovered from the back-office MCP server.
 // Read tools run immediately; tools that change data become approval requests.
 
-import Anthropic from '@anthropic-ai/sdk';
+import { chat, MODEL } from './llm.mjs';
 import { readResult, requestAction, takeDecisionNote } from './approvals.mjs';
 import { nowLocal, TECHS } from './data.mjs';
 
-export const MODEL = process.env.MODEL ?? 'claude-opus-5';
-const EFFORT = process.env.EFFORT ?? 'low';
+export { MODEL };
 const MAX_TOOL_ROUNDS = 6;
-const PRICES = { 'claude-opus-5': [5, 25], 'claude-opus-5-5': [4, 20], 'claude-sonnet-5': [2, 10], 'claude-haiku-4-5': [1, 5] };
-
-const client = new Anthropic({ timeout: 90_000, maxRetries: 1 });
 
 const SYSTEM = `You are the operations assistant for Copperline Heating & Air, an HVAC company in Austin, Texas with technicians ${TECHS.join(', ')}. You work for the office staff (a dispatcher or the owner), not for customers.
 
@@ -34,11 +30,6 @@ export function toClaudeTools(mcpTools) {
       : `${t.description} REQUIRES APPROVAL: calling this queues the change for a person to approve; it does not run until they do.`,
     input_schema: (({ $schema, ...rest }) => rest)(t.inputSchema),
   }));
-}
-
-function costOf(usage) {
-  const [i, o] = PRICES[MODEL] ?? PRICES['claude-opus-5'];
-  return (((usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) * 1.25 + (usage.cache_read_input_tokens ?? 0) * 0.1) * i + (usage.output_tokens ?? 0) * o) / 1e6;
 }
 
 export class AiUnavailable extends Error {}
@@ -71,15 +62,12 @@ export async function respond(db, bo, session, userText, { beforeCall, onCost })
     if (blocked) { rollback(); throw new AiUnavailable(blocked); }
     let response;
     try {
-      response = await client.messages.create({
-        model: MODEL, max_tokens: 3000, system: SYSTEM, tools, messages: session.messages,
-        cache_control: { type: 'ephemeral' }, output_config: { effort: EFFORT },
-      });
+      response = await chat({ system: SYSTEM, tools, messages: session.messages, maxTokens: 3000, timeout: 90_000 });
     } catch (err) {
       rollback();
       throw err;
     }
-    const c = costOf(response.usage);
+    const c = response.cost;
     cost += c;
     onCost(c);
 

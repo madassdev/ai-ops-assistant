@@ -16,6 +16,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "luxon": "^3.7.2",
+    "openai": "^7.27.0",
     "zod": "^4.6.5"
   },
   "engines": {
