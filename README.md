@@ -10,7 +10,7 @@ A back-office assistant for a (fictional) heating and air company. Staff ask abo
 ## Architecture
 
 ```
-browser ── /api/chat ──► agent.mjs (Claude, tool loop)
+browser ── /api/chat ──► agent.mjs (LLM tool loop)
                               │  tools discovered via MCP
                               ▼
                          MCP client ──in-process──► mcp-server.mjs (business tools)
@@ -41,12 +41,12 @@ Or probe it: `node scripts/probe-mcp.mjs https://ops.frankonline.cloud/mcp`
 
 ```bash
 npm install
-cp .env.example .env   # add ANTHROPIC_API_KEY
+cp .env.example .env   # add OPENAI_API_KEY (or ANTHROPIC_API_KEY with PROVIDER=anthropic)
 node --env-file=.env server.mjs   # http://localhost:5200
 npm test                         # MCP discovery, approvals, roles, validation
 ```
 
-Stack: Node 24, Express 5, `@modelcontextprotocol/sdk`, Zod, Anthropic SDK, built-in `node:sqlite`, Luxon, plain HTML/CSS/JS, Docker + Caddy. Demo data is generated relative to today and rebuilt daily.
+Stack: Node 24, Express 5, `@modelcontextprotocol/sdk`, Zod, OpenAI or Anthropic SDK through `llm.mjs` (`PROVIDER`, default model `gpt-4.1-mini`), built-in `node:sqlite`, Luxon, plain HTML/CSS/JS, Docker + Caddy. Demo data is generated relative to today and rebuilt daily.
 
 ## Adapting it for a real business
 
